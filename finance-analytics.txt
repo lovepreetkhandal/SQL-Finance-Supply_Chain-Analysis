@@ -1,0 +1,85 @@
+use gdb041;
+
+SELECT customer_code FROM dim_customer 
+where customer like "%Atliq Exclusive%" and market = "USA";
+--------------------------------------------------------------------------------
+SELECT * FROM gdb041.fact_sales_monthly;
+SELECT * FROM gdb041.fact_sales_monthly a
+join dim_product b
+on a.product_code = b.product_code
+where year(DATE_ADD(date, interval 4 month)) = 2021
+and customer_code = (SELECT customer_code FROM dim_customer 
+					where customer like "%Atliq Exclusive%" and market = "USA")
+order by date;
+
+---------------------------------------------------------------------------------
+--- USING USER DEFINED FUNCTIONS FOR FY AND QUARTERS---
+----------------------------------------------------------------------------------
+SELECT a.date, a.product_code, b.product, b.variant, a.sold_quantity, c.fiscal_year, c.gross_price, 
+round(c.gross_price * a.sold_quantity, 2) as gross_price_total
+FROM gdb041.fact_sales_monthly a
+join dim_product b
+on a.product_code = b.product_code
+join  fact_gross_price c
+on c.product_code = a.product_code and c.fiscal_year = get_fiscal_year(a.date)
+where get_fiscal_year(date) = 2021 
+and customer_code = (SELECT customer_code FROM dim_customer 
+					where customer like "%Atliq Exclusive%" and market = "USA")
+order by date;
+----------------------------------------------------------------------------------
+select a.date,  sum(b.gross_price * a.sold_quantity) as total_gross_price
+from fact_sales_monthly a
+join
+fact_gross_price b
+on a.product_code = b.product_code
+and get_fiscal_year(a.date) = b.fiscal_year
+where get_fiscal_year(date) = 2021 
+and customer_code = (SELECT customer_code FROM dim_customer 
+					where customer like "%croma%" and market = "India")
+group by a.date
+having total_gross_price > 250000
+order by a.date;
+--------------------------------------------------------------------------------------------
+select  b.fiscal_year, sum(b.gross_price * a.sold_quantity) as total_gross_price
+from fact_sales_monthly a
+join
+fact_gross_price b
+on a.product_code = b.product_code
+and get_fiscal_year(a.date) = b.fiscal_year
+where customer_code = (select customer_code from dim_customer
+						where customer like "%croma%" and
+                        market = "India")
+group by fiscal_year;
+-----------------------------------------------------------------------------------------------
+### Creating stored procedure for market and FY
+USE `gdb041`;
+DROP procedure IF EXISTS `get_market_badge`;
+
+DELIMITER $$
+USE `gdb041`$$
+CREATE PROCEDURE `get_market_badge` (
+IN in_market varchar(45),
+IN in_fiscal_year year,
+OUT out_badge varchar(10))
+BEGIN
+declare qty int default 0;
+## retrieve qty for given market and fiscal year
+select sum(sold_quantity)into qty
+from fact_sales_monthly a
+join dim_customer b
+on a.customer_code = b.customer_code
+where get_fiscal_year(a.date) = in_fiscal_year and b.market = in_market
+group by b.market;
+# determine the badge 
+if qty > 5000000 then  set out_badge = 'Gold';
+else set out_badge = 'Silver';
+end if;
+END$$
+
+DELIMITER ;
+;
+---------------------------------------------------------------------------------------------------
+set @out_badge = '0';
+call gdb041.get_market_badge('USA', 2021, @out_badge);
+select @out_badge;
+-----------------------------------------------------------------------------------------------
